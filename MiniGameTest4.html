@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mini Game 💘</title>
+
+  <!-- Fuente romántica (si hay internet). Si no, cae a cursive. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Quicksand:wght@500;700&display=swap" rel="stylesheet">
+
+  <style>
+    body { margin:0; background:#0b1220; color:#e8eefc; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px; }
+
+    .top { display:flex; justify-content:space-between; gap:10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .pill {
+      font-family: "Quicksand", system-ui, Arial, sans-serif;
+      font-size: 13px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+    }
+
+    .card {
+      border-radius: 18px;
+      padding: 18px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.14);
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-family: "Great Vibes", "Comic Sans MS", cursive;
+      font-size: 44px;
+      font-weight: 400;
+      letter-spacing: .2px;
+    }
+    .muted {
+      font-family: "Quicksand", system-ui, Arial, sans-serif;
+      opacity:.84;
+      margin: 4px 0 0;
+    }
+    .small {
+      font-family: "Quicksand", system-ui, Arial, sans-serif;
+      font-size:12px;
+      opacity:.78;
+    }
+
+    .hud { display:flex; align-items:center; gap:12px; margin: 12px 0; flex-wrap: wrap; }
+    .progress {
+      flex: 1;
+      min-width: 240px;
+      height: 16px;
+      background: rgba(255,255,255,.08);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    .progress > div {
+      height:100%;
+      width:100%;
+      background: rgba(255,255,255,.35);
+      transition: width .12s ease;
+    }
+
+    canvas {
+      width:100%;
+      height:auto;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+      display:block;
+      touch-action: manipulation;
+    }
+
+    .controls { display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px; }
+    button {
+      font-family: "Quicksand", system-ui, Arial, sans-serif;
+      background: rgba(255,255,255,.10);
+      color:#e8eefc;
+      border:1px solid rgba(255,255,255,.18);
+      padding: 10px 12px;
+      border-radius:14px;
+      cursor:pointer;
+    }
+    button:hover { background: rgba(255,255,255,.16); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+  </style>
+</head>
+
+<body>
+  <main class="wrap">
+    <header class="top">
+      <div class="pill" id="badge">Mini Game 💘</div>
+      <div class="pill" id="scorePill">💘 0/20 | Vida: 100</div>
+      <div class="pill" id="statusPill">Estado: listo</div>
+    </header>
+
+    <section class="card">
+      <h1>Catch the Hearts</h1>
+      <p class="muted">Click/tap en corazones rojos 💘. Evita bombas plateadas 💣. Meta: 20.</p>
+
+      <div class="hud">
+        <div class="progress" aria-label="vida"><div id="hpBar"></div></div>
+        <div class="small" id="hpText">Vida: 100</div>
+      </div>
+
+      <canvas id="game" width="800" height="420" aria-label="juego"></canvas>
+
+      <div class="controls">
+        <button id="startBtn">▶️ Empezar</button>
+        <button id="pauseBtn" disabled>⏸️ Pausar</button>
+        <button id="resetBtn">🔁 Reiniciar</button>
+      </div>
+
+      <p class="small">En celular: toca los íconos. En PC: click. (El sonido se activa al dar “Empezar”).</p>
+    </section>
+  </main>
+
+<script>
+  // ========= Config =========
+  const PLAYER_NAME = "Paolo 💕";
+  const GOAL_HEARTS = 20;
+
+  const WIN_MESSAGE  = "Espero que tengas un lindo día. Te amo ❤️😘";
+  const LOSE_MESSAGE = "Oopsi, hazlo de nuevo :(";
+
+  const HEART_COLOR = "#ff2f67"; // rojo
+  const BOMB_COLOR  = "#c0c0c0"; // plateado
+  // ==========================
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  const startBtn = document.getElementById("startBtn");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const scorePill = document.getElementById("scorePill");
+  const statusPill = document.getElementById("statusPill");
+  const badge = document.getElementById("badge");
+  const hpBar = document.getElementById("hpBar");
+  const hpText = document.getElementById("hpText");
+
+  badge.textContent = `Para ${PLAYER_NAME} 💘`;
+
+  let running = false;
+  let paused = false;
+  let rafId = null;
+
+  const state = {
+    score: 0,
+    hp: 100,
+    heartsCaught: 0,
+    t: 0,
+    speed: 1,
+    items: []
+  };
+
+  // ======= Audio (Web Audio, sin archivos externos) =======
+  let audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+
+  function beep({ freq=440, dur=0.08, type="sine", gain=0.05 } = {}) {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = gain;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  }
+
+  function playHeartSound() {
+    ensureAudio();
+    beep({ freq: 740, dur: 0.06, type:"sine", gain:0.05 });
+    setTimeout(() => beep({ freq: 980, dur: 0.07, type:"sine", gain:0.05 }), 55);
+  }
+
+  function playBombSound() {
+    ensureAudio();
+    beep({ freq: 140, dur: 0.10, type:"square", gain:0.03 });
+  }
+
+  function playWinSound() {
+    ensureAudio();
+    const notes = [523, 659, 784, 1046]; // do-mi-sol-do
+    notes.forEach((f, i) => setTimeout(() => beep({ freq:f, dur:0.10, type:"sine", gain:0.05 }), i*120));
+  }
+  // ========================================================
+
+  // ======= Confetti =======
+  const confetti = [];
+  function spawnConfettiBurst() {
+    confetti.length = 0;
+    const n = 140;
+    for (let i = 0; i < n; i++) {
+      confetti.push({
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        vx: (Math.random() * 2 - 1) * (180 + Math.random()*220),
+        vy: (Math.random() * 2 - 1) * (180 + Math.random()*220) - 120,
+        g: 420 + Math.random()*220,
+        r: 2 + Math.random()*4,
+        life: 1.6 + Math.random()*0.9,
+        rot: Math.random()*Math.PI*2,
+        vr: (Math.random()*2 - 1) * 8
+      });
+    }
+  }
+
+  function updateConfetti(dt) {
+    for (const c of confetti) {
+      c.life -= dt;
+      c.vy += c.g * dt;
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.rot += c.vr * dt;
+    }
+    for (let i = confetti.length - 1; i >= 0; i--) {
+      if (confetti[i].life <= 0) confetti.splice(i, 1);
+    }
+  }
+
+  function drawConfetti() {
+    if (!confetti.length) return;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    for (const c of confetti) {
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      // sin colores definidos “a mano”: alterno blanco/plateado/rojo suave por tema
+      const palette = ["rgba(255,255,255,.85)", "rgba(192,192,192,.85)", "rgba(255,47,103,.85)"];
+      ctx.fillStyle = palette[(Math.random()*palette.length) | 0];
+      ctx.fillRect(-c.r, -c.r, c.r*2.2, c.r*1.2);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  // =======================
+
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+  function setHUD() {
+    scorePill.textContent = `💘 ${state.heartsCaught}/${GOAL_HEARTS} | Vida: ${state.hp}`;
+    hpText.textContent = `Vida: ${state.hp}`;
+    hpBar.style.width = `${clamp(state.hp, 0, 100)}%`;
+  }
+
+  function reset() {
+    state.score = 0;
+    state.hp = 100;
+    state.heartsCaught = 0;
+    state.t = 0;
+    state.speed = 1;
+    state.items = [];
+    confetti.length = 0;
+
+    running = false;
+    paused = false;
+
+    startBtn.disabled = false;
+    pauseBtn.disabled = true;
+    pauseBtn.textContent = "⏸️ Pausar";
+
+    statusPill.textContent = "Estado: listo";
+    setHUD();
+    draw();
+  }
+
+  function spawnItem() {
+    const isBomb = Math.random() < 0.26; // bombas un poco menos
+    const x = 26 + Math.random() * (canvas.width - 52);
+    const r = isBomb ? 16 : 14;
+
+    // Velocidad jugable (no turbo)
+    const vy = (1.0 + Math.random() * 0.8) * state.speed;
+
+    state.items.push({ type: isBomb ? "bomb" : "heart", x, y: -24, r, vy });
+  }
+
+  function update(dt) {
+    state.t += dt;
+
+    // Dificultad suave
+    state.speed = 1 + Math.min(0.55, state.heartsCaught / 36);
+
+    // Spawn rate suave
+    const spawnEvery = Math.max(0.42, 0.78 - state.heartsCaught / 110);
+    if (state.t % spawnEvery < dt) spawnItem();
+
+    // Move items
+    for (const it of state.items) it.y += it.vy;
+
+    // Si un corazón se escapa: baja vida
+    let changed = false;
+    state.items = state.items.filter(it => {
+      const off = it.y - it.r > canvas.height + 16;
+      if (!off) return true;
+
+      if (it.type === "heart") {
+        state.hp -= 7;
+        changed = true;
+      }
+      return false;
+    });
+
+    if (changed) setHUD();
+    if (state.hp <= 0) {
+      state.hp = 0;
+      setHUD();
+      endGame(false);
+      return;
+    }
+
+    updateConfetti(dt);
+  }
+
+  function endGame(won) {
+    running = false;
+    paused = false;
+    pauseBtn.disabled = true;
+    startBtn.disabled = false;
+
+    statusPill.textContent = won ? "Estado: ganaste 💘" : "Estado: perdiste 😭";
+
+    if (won) {
+      playWinSound();
+      spawnConfettiBurst();
+    }
+
+    drawOverlay(won);
+    cancelAnimationFrame(rafId);
+  }
+
+  function drawOverlay(won) {
+    draw(); // dibuja el frame base
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.55)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "rgba(255,255,255,.95)";
+    ctx.textAlign = "center";
+    ctx.font = "700 30px system-ui";
+    ctx.fillText(won ? "¡Ganaste! 💘" : "Game Over", canvas.width / 2, canvas.height / 2 - 22);
+
+    ctx.font = "700 16px system-ui";
+    ctx.fillText(`Corazones: ${state.heartsCaught}/${GOAL_HEARTS}  |  Vida: ${state.hp}`,
+      canvas.width / 2, canvas.height / 2 + 8);
+
+    ctx.font = "700 16px system-ui";
+    ctx.fillText(won ? WIN_MESSAGE : LOSE_MESSAGE, canvas.width / 2, canvas.height / 2 + 34);
+    ctx.restore();
+
+    // confetti encima del overlay
+    drawConfetti();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // estrellas
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    for (let s = 0; s < 60; s++) {
+      const x = (s * 97) % canvas.width;
+      const y = ((s * 53) % canvas.height);
+      ctx.fillStyle = "rgba(255,255,255,.10)";
+      ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.restore();
+
+    // items
+    for (const it of state.items) {
+      if (it.type === "heart") drawHeart(it.x, it.y, it.r);
+      else drawBomb(it.x, it.y, it.r);
+    }
+
+    drawConfetti();
+
+    // hint
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.font = "700 12px system-ui";
+    ctx.textAlign = "left";
+    ctx.fillText("Click/tap sobre 💘. Evita 💣.", 14, 18);
+    ctx.restore();
+  }
+
+  function drawHeart(x, y, s) {
+    ctx.save();
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = HEART_COLOR;
+    ctx.fillStyle = HEART_COLOR;
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.bezierCurveTo(x, y - s, x - 1.3*s, y - 0.2*s, x, y + 1.1*s);
+    ctx.bezierCurveTo(x + 1.3*s, y - 0.2*s, x, y - s, x, y);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBomb(x, y, r) {
+    ctx.save();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = "rgba(255,255,255,.20)";
+
+    // cuerpo plateado
+    ctx.fillStyle = BOMB_COLOR;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fill();
+
+    // highlight
+    ctx.fillStyle = "rgba(255,255,255,.25)";
+    ctx.beginPath();
+    ctx.arc(x - r*0.35, y - r*0.35, r*0.35, 0, Math.PI*2);
+    ctx.fill();
+
+    // fuse
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + r*0.1, y - r);
+    ctx.quadraticCurveTo(x + r*0.9, y - r*1.4, x + r*0.7, y - r*1.9);
+    ctx.stroke();
+
+    // spark
+    ctx.fillStyle = "rgba(255,255,255,.80)";
+    ctx.beginPath();
+    ctx.arc(x + r*0.7, y - r*1.9, 3, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Click/tap: recoger items
+  function canvasToWorld(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top)  * (canvas.height / rect.height);
+    return { mx, my };
+  }
+
+  function tryPick(mx, my) {
+    for (let idx = state.items.length - 1; idx >= 0; idx--) {
+      const it = state.items[idx];
+      const dx = mx - it.x;
+      const dy = my - it.y;
+      if ((dx*dx + dy*dy) <= it.r*it.r) {
+        if (it.type === "heart") {
+          playHeartSound();
+          state.heartsCaught += 1;
+          state.score += 10;
+          state.items.splice(idx, 1);
+          setHUD();
+          if (state.heartsCaught >= GOAL_HEARTS) endGame(true);
+        } else {
+          playBombSound();
+          state.hp -= 18;
+          state.items.splice(idx, 1);
+          if (state.hp <= 0) state.hp = 0;
+          setHUD();
+          if (state.hp <= 0) endGame(false);
+        }
+        return;
+      }
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!running || paused) return;
+    const { mx, my } = canvasToWorld(e);
+    tryPick(mx, my);
+  });
+
+  let last = performance.now();
+  function loop(now) {
+    // IMPORTANTE: requestAnimationFrame SIEMPRE, para que no “muera” el loop
+    rafId = requestAnimationFrame(loop);
+
+    if (!running || paused) return;
+
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+
+    update(dt);
+    draw();
+  }
+
+  function start() {
+    // Asegura audio por gesto del usuario
+    ensureAudio();
+
+    // si venías de un endgame, reanuda loop limpio
+    if (!rafId) rafId = requestAnimationFrame(loop);
+
+    running = true;
+    paused = false;
+
+    startBtn.disabled = true;
+    pauseBtn.disabled = false;
+
+    statusPill.textContent = "Estado: jugando…";
+    last = performance.now();
+  }
+
+  function togglePause() {
+    if (!running) return;
+    paused = !paused;
+    pauseBtn.textContent = paused ? "▶️ Reanudar" : "⏸️ Pausar";
+    statusPill.textContent = paused ? "Estado: pausado" : "Estado: jugando…";
+    if (!paused) last = performance.now();
+  }
+
+  startBtn.addEventListener("click", start);
+  pauseBtn.addEventListener("click", togglePause);
+  resetBtn.addEventListener("click", () => {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+    reset();
+  });
+
+  // init
+  reset();
+  rafId = requestAnimationFrame(loop);
+</script>
+</body>
+</html>
